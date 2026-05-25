@@ -38,7 +38,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: cache
-          key: nba-data-retrain-${{ github.run_id }}
+          key: nba-data-retrain-cache
           restore-keys: |
             nba-data-
 
@@ -53,7 +53,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: cache
-          key: nba-data-retrain-${{ github.run_id }}
+          key: nba-data-retrain-cache
 
       - name: Build dataset
         run: python -m nba_predictor.cli.main build
