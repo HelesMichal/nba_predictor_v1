@@ -49,6 +49,17 @@ jobs:
           if [ -z "$END" ]; then END=$(date -u +%Y); fi
           python -m nba_predictor.cli.main fetch --start $START --end $END
 
+      - name: Debug after fetch
+        run: |
+          echo "Current directory:"
+          pwd
+
+          echo "Cache directory:"
+          ls -R cache || true
+
+          echo "Entire project files:"
+          find . -name "*.parquet"
+
       - name: Save data cache
         uses: actions/cache/save@v4
         with:
