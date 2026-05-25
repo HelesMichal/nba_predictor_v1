@@ -1,0 +1,79 @@
+name: Weekly retrain
+
+# Mondays 06:00 UTC + manual trigger
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      start_year:
+        description: "First season to train on"
+        required: false
+        default: "2013"
+      end_year:
+        description: "Last season to train on"
+        required: false
+        default: ""
+
+concurrency:
+  group: weekly-retrain
+  cancel-in-progress: true
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Restore data cache
+        uses: actions/cache@v4
+        with:
+          path: cache
+          key: nba-data-retrain-${{ github.run_id }}
+          restore-keys: |
+            nba-data-
+
+      - name: Fetch full history
+        run: |
+          START=${{ github.event.inputs.start_year || '2013' }}
+          END=${{ github.event.inputs.end_year }}
+          if [ -z "$END" ]; then END=$(date -u +%Y); fi
+          python -m nba_predictor.cli.main fetch --start $START --end $END
+
+      - name: Build dataset
+        run: python -m nba_predictor.cli.main build
+
+      - name: Train model
+        run: python -m nba_predictor.cli.main train
+
+      # Save model so the daily workflow can pick it up.
+      - name: Save trained model to cache
+        uses: actions/cache/save@v4
+        with:
+          path: artifacts
+          key: nba-model-v1
+
+      - name: Upload model as workflow artifact (backup)
+        uses: actions/upload-artifact@v4
+        with:
+          name: trained-model
+          path: artifacts/
+          retention-days: 30
+
+      - name: Notify Telegram that retrain finished
+        if: always()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          STATUS="${{ job.status }}"
+          python -m nba_predictor.notify.telegram "Weekly retrain finished: $STATUS"

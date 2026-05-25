@@ -1,0 +1,71 @@
+name: Daily NBA predictions
+
+# 15:00 UTC = 17:00 CET (winter) / 17:00 CEST is 15:00 UTC too in summer? No:
+# CET = UTC+1, CEST = UTC+2. To hit 17:00 local in Central Europe year-round,
+# we run BOTH at 16:00 UTC (=17:00 CET in winter) and 15:00 UTC (=17:00 CEST in summer).
+# In practice you'll get one notification ~17:00 local; the other lands at 16:00 local.
+# If you prefer a single fixed slot, delete one of the two cron lines.
+on:
+  schedule:
+    - cron: "0 15 * * *"   # 17:00 CEST (summer)
+    - cron: "0 16 * * *"   # 17:00 CET  (winter)
+  workflow_dispatch:        # manual "Run workflow" button
+
+concurrency:
+  group: daily-predict
+  cancel-in-progress: false
+
+jobs:
+  predict:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      # Restore the trained model produced by the weekly retrain workflow.
+      - name: Restore trained model
+        uses: actions/cache@v4
+        with:
+          path: artifacts
+          key: nba-model-v1
+          # If no cache exists yet (first run before retrain), we'll train below.
+
+      # Restore data parquet between runs so we don't refetch full history daily.
+      - name: Restore data cache
+        uses: actions/cache@v4
+        with:
+          path: cache
+          key: nba-data-${{ github.run_id }}
+          restore-keys: |
+            nba-data-
+
+      - name: Incremental fetch (current season only)
+        run: |
+          YEAR=$(date -u +%Y)
+          python -m nba_predictor.cli.main fetch --start $((YEAR-1)) --end $YEAR
+
+      - name: Rebuild dataset
+        run: python -m nba_predictor.cli.main build
+
+      - name: Train model if none cached
+        run: |
+          if [ ! -f artifacts/model.joblib ]; then
+            echo "No cached model found — training now."
+            python -m nba_predictor.cli.main train
+          else
+            echo "Using cached model."
+          fi
+
+      - name: Predict + notify Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m nba_predictor.cli.main notify --days 1
