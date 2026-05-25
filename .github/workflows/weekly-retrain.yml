@@ -49,6 +49,12 @@ jobs:
           if [ -z "$END" ]; then END=$(date -u +%Y); fi
           python -m nba_predictor.cli.main fetch --start $START --end $END
 
+      - name: Save data cache
+        uses: actions/cache/save@v4
+        with:
+          path: cache
+          key: nba-data-retrain-${{ github.run_id }}
+
       - name: Build dataset
         run: python -m nba_predictor.cli.main build
 
